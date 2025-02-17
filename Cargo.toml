@@ -3,10 +3,4 @@ name = "rainbow"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-half = "2.4.0"
-libloading = "0.8"
-libffi = "3.2.0"
-indexmap = "2.6.0"

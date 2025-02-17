@@ -1,9 +1,0 @@
-.include "io.rasm"
-
-void main() {
-    PUSH "Hello, World!"
-    PUSH 13
-    CALL io.println
-}
-
-CALL main
