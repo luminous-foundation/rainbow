@@ -1,10 +1,10 @@
-use std::{collections::HashMap, fs, path::PathBuf, process::Command, sync::Arc};
-use common::{ModuleType, Program};
+use std::{collections::HashMap, fs, mem, path::PathBuf, process::Command, rc::Rc};
+use common::{FFIResult, FFIString, ModuleType, Program};
 use libloading::{Library, Symbol};
 
 type GetType = unsafe extern "C" fn() -> ModuleType;
-type ProcessBeginning = unsafe extern "C" fn(*const u8, usize) -> Program;
-type ProcessMiddle = unsafe extern "C" fn(Program) -> Program;
+type ProcessBeginning = unsafe extern "C" fn(*mut u8, usize) -> FFIResult<Program>;
+type ProcessMiddle = unsafe extern "C" fn(Program) -> FFIResult<Program>;
 type ProcessEnd = unsafe extern "C" fn(Program);
 
 pub struct ModuleHandler {
@@ -12,7 +12,7 @@ pub struct ModuleHandler {
     logging: bool,
     rebuild: bool,
 
-    library_cache: HashMap<String, Arc<Library>>
+    library_cache: HashMap<String, Rc<Library>>
 }
 
 impl ModuleHandler {
@@ -20,14 +20,22 @@ impl ModuleHandler {
         ModuleHandler { module_dir, logging, rebuild, library_cache: HashMap::new() }
     }
 
-    pub fn call_beginning(&mut self, name: &String, input: Vec<u8>) -> Result<Program, String> {
+    pub fn call_beginning(&mut self, name: &String, mut input: Vec<u8>) -> Result<Program, String> {
         println!("executing beginning module {name}");
 
         self.check_module_type(name, ModuleType::BEGINNING)?;
 
         let module = self.get_module(name)?;
         let symbol = Self::get_symbol::<ProcessBeginning>(name, &module, b"process")?;
-        Ok(unsafe { symbol(input.as_ptr(), input.len()) })
+        
+        let res = unsafe { symbol(input.as_mut_ptr(), input.len()) };
+
+        mem::forget(input);
+
+        match res {
+            FFIResult::Ok(v) => Ok(v),
+            FFIResult::Error(e) => unsafe { Err(FFIString::to_string(e)) }
+        }
     }
 
     pub fn call_middle(&mut self, name: &String, input: Program) -> Result<Program, String> {
@@ -37,7 +45,13 @@ impl ModuleHandler {
 
         let module = self.get_module(name)?;
         let symbol = Self::get_symbol::<ProcessMiddle>(name, &module, b"process")?;
-        Ok(unsafe { symbol(input) })
+        
+        let res = unsafe { symbol(input) };
+
+        match res {
+            FFIResult::Ok(v) => Ok(v),
+            FFIResult::Error(e) => unsafe { Err(FFIString::to_string(e)) }
+        }
     }
 
     pub fn call_end(&mut self, name: &String, input: Program) -> Result<(), String> {
@@ -51,7 +65,7 @@ impl ModuleHandler {
         Ok(())
     }
 
-    fn get_module(&mut self, name: &String) -> Result<Arc<Library>, String> {
+    fn get_module(&mut self, name: &String) -> Result<Rc<Library>, String> {
         if let Some(lib) = self.library_cache.get(name) {
             return Ok(lib.clone());
         } else {
@@ -83,9 +97,7 @@ impl ModuleHandler {
                 }
 
                 self.run_script(&folder, &"build".to_string())?;
-            }
-
-            if self.rebuild {
+            } else if self.rebuild {
                 if self.logging {
                     println!("Rebuild is enabled, running build script...");
                 }
@@ -95,7 +107,7 @@ impl ModuleHandler {
 
             let lib = unsafe { Library::new(path) };
             if let Ok(lib) = lib {
-                let lib = Arc::new(lib);
+                let lib = Rc::new(lib);
                 self.library_cache.insert(name.clone(), lib.clone());
                 return Ok(lib);
             } else if let Err(err) = lib {
@@ -142,12 +154,14 @@ impl ModuleHandler {
         if let Err(err) = output {
             return Err(format!("Failed to run build script `{path}` (given error: `{err}`)"));
         } else if let Ok(out) = output {
-            if self.logging && !out.status.success(){
+            if (self.logging && !out.status.success()) || out.stderr.len() > 0 {
                 if out.stdout.len() > 0 {
                     println!("stdout:\n{}", String::from_utf8_lossy(&out.stdout));
                 }
                 if out.stderr.len() > 0 {
                     println!("stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+
+                    return Err(format!("Rebuild failed (build script has stderr output)"));
                 }
                 println!("{}", out.status);
             }
