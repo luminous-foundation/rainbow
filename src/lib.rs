@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fs, mem, path::PathBuf, process::Command, rc::Rc};
-use common::{FFIResult, FFIString, ModuleType, Program};
+
+use common::{ffi::{FFIResult, FFIString}, ModuleType, Program};
 use libloading::{Library, Symbol};
 
 type GetType = unsafe extern "C" fn() -> ModuleType;

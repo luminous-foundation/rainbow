@@ -1,17 +1,101 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
-use crate::{FFIArray, FFIString};
+use crate::{ffi::{FFIArray, FFIString}, instructions::RawInstruction};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
-pub struct CodeChunk {
+pub enum RawCodeBlock {
+    Instructions(Vec<RawInstruction>),
+    Scope(usize),
+}
 
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawStructVar {
+    pub typ: RawType,
+    pub name: DataIndex,
+    pub default: DataIndex,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawStruct {
+    pub name: DataIndex,
+    pub variables: FFIArray<RawStructVar>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawArgument {
+    pub typ: RawType,
+    pub name: DataIndex,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawFunction {
+    pub name: DataIndex,
+    pub ret_type: RawType,
+    pub args: FFIArray<RawArgument>,
+    pub body: usize,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawCodeChunk {
+    pub has_parent: bool,
+
+    pub blocks: FFIArray<RawCodeBlock>,
+
+    pub structs: FFIArray<RawStruct>,
+    pub functions: FFIArray<RawFunction>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum RawImport {
+    FullImport {
+        path: DataIndex,
+        parent_modules: FFIArray<DataIndex>,
+        name: DataIndex,
+        as_name: DataIndex,
+    },
+    ItemImport {
+        path: DataIndex,
+        parent_modules: FFIArray<DataIndex>,
+        name: DataIndex,
+        item: DataIndex,
+        as_name: DataIndex,
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawExtern {
+    pub path: DataIndex,
+    pub name: DataIndex,
+    pub ret_type: RawType,
+    pub arg_types:FFIArray<RawType>,
+    pub as_name: DataIndex,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum RawModuleBlock {
+    Submodule(FFIArray<usize>),
+    Import(FFIArray<RawImport>),
+    Export(FFIArray<DataIndex>),
+    Extern(FFIArray<RawExtern>),
 }
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct ModuleChunk {
+pub struct RawModuleChunk {
+    pub name: DataIndex,
+    pub has_parent: bool,
+    pub code_chunk: usize,
 
+    pub blocks: FFIArray<RawModuleBlock>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,11 +105,17 @@ pub struct DataIndex {
     pub index: usize
 }
 
+impl Display for DataIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.chunk, self.index)
+    }
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RawFuncRef {
-    pub module: Vec<DataIndex>,
-    pub function: Vec<DataIndex>,
+    pub module: FFIArray<DataIndex>,
+    pub function: FFIArray<DataIndex>,
     pub name: DataIndex,
     pub is_extern: bool,
 }
@@ -33,8 +123,8 @@ pub struct RawFuncRef {
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RawStructRef {
-    pub module: Vec<DataIndex>,
-    pub function: Vec<DataIndex>,
+    pub module: FFIArray<DataIndex>,
+    pub function: FFIArray<DataIndex>,
     pub name: DataIndex,
 }
 
@@ -48,21 +138,108 @@ pub enum RawComplexType {
     Struct(DataIndex),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 pub enum RawData {
     Number(Number),
-    Text(String),
-    Array(Vec<DataIndex>),
+    Text(*const FFIString),
+    Array(FFIArray<DataIndex>),
     FuncRef(RawFuncRef),
     StructRef(RawStructRef),
     ComplexType(RawComplexType),
 }
 
+impl Debug for RawData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RawData::Number(n)      => write!(f, "{:?}", n),
+            RawData::Text(t)        => write!(f, "\"{}\"", unsafe { FFIString::to_string(*t) }),
+            RawData::Array(a)       => write!(f, "{:#?}", a),
+            RawData::FuncRef(r)     => write!(f, "{:?}", r),
+            RawData::StructRef(s)   => write!(f, "{:?}", s),
+            RawData::ComplexType(t) => write!(f, "{:?}", t),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub enum RawMetadata {
+    General(DataIndex, DataIndex),
+    Byte(usize, usize, DataIndex),
+    Element(usize, usize, DataIndex),
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct RawTypeCast {
+    pub type_a: RawType,
+    pub type_b: RawType,
+    pub function: DataIndex,
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct RawDataChunk {
-    pub data: Vec<RawData>,
+pub enum RawType {
+    Void,
+    U8,
+    U16,
+    U32,
+    U64,
+    UXX(DataIndex),
+    I8,
+    I16,
+    I32,
+    I64,
+    IXX(DataIndex),
+    F8,
+    F16,
+    F32,
+    F64,
+    FXX(DataIndex, DataIndex),
+    Struct(DataIndex),
+    Name,
+    Type,
+    FuncRef,
+    StructRef,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawRuntimeConstant {
+    pub name: DataIndex,
+    pub typ: RawType,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct RawFileImport {
+    pub path: DataIndex,
+    pub internal_path: DataIndex,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub enum RawChunk {
+    Code(RawCodeChunk),
+    Module(RawModuleChunk),
+    Data(FFIArray<RawData>),
+    Metadata(FFIArray<RawMetadata>),
+    TypeCast(FFIArray<RawTypeCast>),
+    RuntimeConstant(FFIArray<RawRuntimeConstant>),
+    FileImport(FFIArray<RawFileImport>),
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CodeChunk {
+
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ModuleChunk {
+
 }
 
 #[derive(Debug)]
@@ -226,15 +403,36 @@ impl Display for StructRef {
     }
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum ComplexType {
+    uXX(u64),
+    iXX(u64),
+    fXX(u64, u64),
+    Struct(StructRef),
+}
+
+impl Display for ComplexType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ComplexType::uXX(s)    => write!(f, "type uXX({s})"),
+            ComplexType::iXX(s)    => write!(f, "type iXX({s})"),
+            ComplexType::fXX(e, m) => write!(f, "type fXX({e}, {m})"),
+            ComplexType::Struct(s) => write!(f, "type Struct({s})"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub enum Data {
     Number(Number),
-    Text(*mut FFIString),
+    Text(*const FFIString),
     Array(FFIArray<Data>),
     FuncRef(FuncRef),
     StructRef(StructRef),
-    ComplexType,
+    ComplexType(ComplexType),
 }
 
 impl Display for Data {
@@ -258,7 +456,7 @@ impl Display for Data {
             }
             Data::FuncRef(func) => write!(f, "{func}"),
             Data::StructRef(s) => write!(f, "{s}"),
-            Data::ComplexType => write!(f, "complex type is todo :)"),
+            Data::ComplexType(t) => write!(f, "{t}"),
         }
     }
 }
@@ -266,7 +464,7 @@ impl Display for Data {
 #[derive(Debug)]
 #[repr(C)]
 pub struct DataChunk {
-    pub raw: RawDataChunk,
+    pub raw: FFIArray<RawData>,
     pub data: FFIArray<Data>,
 }
 
@@ -325,3 +523,15 @@ pub struct FileImportChunk {
 
 }
 
+#[derive(Debug)]
+#[repr(C)]
+pub enum Chunk {
+    Code(CodeChunk),
+    Module(ModuleChunk),
+    Data(DataChunk),
+    Metadata(MetadataChunk),
+    TypeCast(TypeCastChunk),
+    ConditionalParsing(ConditionalParsingChunk),
+    RuntimeConstant(RuntimeConstantChunk),
+    FileImport(FileImportChunk),
+}
