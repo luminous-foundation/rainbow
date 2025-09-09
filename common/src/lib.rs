@@ -1,6 +1,8 @@
 use chunks::Chunk;
 use ffi::{FFIArray, FFIOption};
 
+use crate::chunks::RawChunk;
+
 pub mod chunks;
 pub mod ffi;
 pub mod instructions;
@@ -29,6 +31,7 @@ pub struct Program {
     pub header: Header,
 
     pub body: FFIArray<Chunk>,
+    pub raw_body: FFIArray<RawChunk>,
 
     // TODO: write docs on this field
     pub extra: FFIArray<u8>, // exists to prevent DLL version hell

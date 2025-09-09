@@ -1,12 +1,14 @@
-use std::fmt::{Debug, Display};
+use std::{fmt::{Debug, Display}, hash::Hash};
 
-use crate::{ffi::{FFIArray, FFIString}, instructions::RawInstruction};
+use crate::{ffi::{FFIArray, FFIString}, instructions::{Instruction, RawInstruction}};
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub enum RawCodeBlock {
     Instructions(Vec<RawInstruction>),
     Scope(usize),
+    Struct(RawStruct),
+    Function(RawFunction),
 }
 
 #[derive(Debug, Clone)]
@@ -46,9 +48,6 @@ pub struct RawCodeChunk {
     pub has_parent: bool,
 
     pub blocks: FFIArray<RawCodeBlock>,
-
-    pub structs: FFIArray<RawStruct>,
-    pub functions: FFIArray<RawFunction>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,7 @@ pub struct RawExtern {
     pub path: DataIndex,
     pub name: DataIndex,
     pub ret_type: RawType,
-    pub arg_types:FFIArray<RawType>,
+    pub arg_types: FFIArray<RawType>,
     pub as_name: DataIndex,
 }
 
@@ -162,7 +161,7 @@ impl Debug for RawData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub enum RawMetadata {
     General(DataIndex, DataIndex),
@@ -170,12 +169,66 @@ pub enum RawMetadata {
     Element(usize, usize, DataIndex),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RawTypeCast {
     pub type_a: RawType,
     pub type_b: RawType,
     pub function: DataIndex,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[repr(C)]
+pub enum Type {
+    Void,
+    U8,
+    U16,
+    U32,
+    U64,
+    UXX(u64),
+    I8,
+    I16,
+    I32,
+    I64,
+    IXX(u64),
+    F8,
+    F16,
+    F32,
+    F64,
+    FXX(u64, u64),
+    Struct(StructRef),
+    Name,
+    Type,
+    FuncRef,
+    StructRef,
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Void      => write!(f, "type void"),
+            Type::U8        => write!(f, "type u8"),
+            Type::U16       => write!(f, "type u16"),
+            Type::U32       => write!(f, "type u32"),
+            Type::U64       => write!(f, "type u64"),
+            Type::UXX(s)    => write!(f, "type uXX({s})"),
+            Type::I8        => write!(f, "type i8"),
+            Type::I16       => write!(f, "type i16"),
+            Type::I32       => write!(f, "type i32"),
+            Type::I64       => write!(f, "type i64"),
+            Type::IXX(s)    => write!(f, "type iXX({s})"),
+            Type::F8        => write!(f, "type f8"),
+            Type::F16       => write!(f, "type f16"),
+            Type::F32       => write!(f, "type f32"),
+            Type::F64       => write!(f, "type f64"),
+            Type::FXX(e, m) => write!(f, "type fXX({e}, {m})"),
+            Type::Struct(s) => write!(f, "type Struct({s})"),
+            Type::Name      => write!(f, "type name"),
+            Type::Type      => write!(f, "type type"),
+            Type::FuncRef   => write!(f, "type funcref"),
+            Type::StructRef => write!(f, "type structref"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -196,7 +249,7 @@ pub enum RawType {
     F16,
     F32,
     F64,
-    FXX(DataIndex, DataIndex),
+    FXX(DataIndex),
     Struct(DataIndex),
     Name,
     Type,
@@ -208,7 +261,7 @@ pub enum RawType {
 #[repr(C)]
 pub struct RawRuntimeConstant {
     pub name: DataIndex,
-    pub typ: RawType,
+    pub default: DataIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -230,16 +283,112 @@ pub enum RawChunk {
     FileImport(FFIArray<RawFileImport>),
 }
 
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum CodeBlock {
+    Instructions(Vec<Instruction>),
+    Scope(usize),
+    Struct(Struct),
+    Function(Function),
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct StructVar {
+    pub typ: Type,
+    pub name: *const FFIString,
+    pub default: Data,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct Struct {
+    pub name: *const FFIString,
+    pub variables: FFIArray<StructVar>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct Argument {
+    pub typ: Type,
+    pub name: *const FFIString,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct Function {
+    pub name: *const FFIString,
+    pub ret_type: Type,
+    pub args: FFIArray<Argument>,
+    pub body: usize,
+}
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct CodeChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
 
+    pub has_parent: bool,
+    pub blocks: FFIArray<CodeBlock>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum Item {
+    Function(FuncRef),
+    Struct(StructRef),
+    Variable(*const FFIString),
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum Import {
+    FullImport {
+        path: *const FFIString,
+        parent_modules: FFIArray<*const FFIString>,
+        name: *const FFIString,
+        as_name: *const FFIString,
+    },
+    ItemImport {
+        path: *const FFIString,
+        parent_modules: FFIArray<*const FFIString>,
+        name: *const FFIString,
+        item: Item,
+        as_name: *const FFIString,
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct Extern {
+    pub path: *const FFIString,
+    pub name: *const FFIString,
+    pub ret_type: Type,
+    pub arg_types: FFIArray<Type>,
+    pub as_name: *const FFIString,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub enum ModuleBlock {
+    Submodule(FFIArray<usize>),
+    Import(FFIArray<Import>),
+    Export(FFIArray<Item>),
+    Extern(FFIArray<Extern>),
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct ModuleChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
 
+    pub name: *const FFIString,
+    pub has_parent: bool,
+    pub code_chunk: usize,
+
+    pub blocks: FFIArray<ModuleBlock>,
 }
 
 #[derive(Debug)]
@@ -381,12 +530,36 @@ impl Display for FuncRef {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 #[repr(C)]
 pub struct StructRef {
     pub module: FFIArray<*const FFIString>,
     pub function: FFIArray<*const FFIString>,
     pub name: *const FFIString,
+}
+
+impl PartialEq for StructRef {
+    fn eq(&self, other: &Self) -> bool {
+        let self_module: Vec<String> = unsafe { std::slice::from_raw_parts(self.module.data, self.module.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let self_function: Vec<String> = unsafe { std::slice::from_raw_parts(self.function.data, self.function.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let self_name: String = unsafe { FFIString::to_string(self.name) };
+        let other_module: Vec<String> = unsafe { std::slice::from_raw_parts(other.module.data, other.module.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let other_function: Vec<String> = unsafe { std::slice::from_raw_parts(other.function.data, other.function.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let other_name: String = unsafe { FFIString::to_string(other.name) };
+
+        self_module == other_module && self_function == other_function && self_name == other_name
+    }
+}
+
+impl Hash for StructRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let module: Vec<String> = unsafe { std::slice::from_raw_parts(self.module.data, self.module.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let function: Vec<String> = unsafe { std::slice::from_raw_parts(self.function.data, self.function.len) }.to_vec().iter().map(|s| unsafe { FFIString::to_string(*s) }).collect();
+        let name: String = unsafe { FFIString::to_string(self.name) };
+        module.hash(state);
+        function.hash(state);
+        name.hash(state);
+    }
 }
 
 impl Display for StructRef {
@@ -463,8 +636,14 @@ impl Display for Data {
 
 #[derive(Debug)]
 #[repr(C)]
+/// Data section chunk
+///
+/// Holds all constants, function references, struct references, and complex types in a program
 pub struct DataChunk {
-    pub raw: FFIArray<RawData>,
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
+
+    /// Array of the data stored inside this chunk
     pub data: FFIArray<Data>,
 }
 
@@ -489,38 +668,85 @@ impl Display for DataChunk {
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct MetadataChunk {
+pub enum Metadata {
+    General(*const FFIString, *const FFIString),
+    Byte(usize, usize, *const FFIString),
+    Element(usize, usize, *const FFIString),
+}
 
+#[derive(Debug)]
+#[repr(C)]
+pub struct MetadataChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
+
+    pub metadata: FFIArray<Metadata>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct TypeCast {
+    pub type_a: Type,
+    pub type_b: Type,
+    pub function: FuncRef,
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeCastChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
 
+    pub type_casts: FFIArray<TypeCast>,
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct ConditionalParsingChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
 
 }
 
 #[derive(Debug)]
 #[repr(C)]
-pub enum RuntimeConstant {
-    Number(Number),
+/// A runtime constant
+///
+/// Holds a value to be used for conditional parsing, and can be overriden through arguments passed to the execution module.
+pub struct RuntimeConstant {
+    /// Name of the runtime constant
+    pub name: *const FFIString,
+    /// Default value of the runtime constant
+    pub default: Data,
 }
 
 #[derive(Debug)]
 #[repr(C)]
+/// Runtime constant chunk
+///
+/// Holds all runtime constants, which are used for conditional parsing
 pub struct RuntimeConstantChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
+
+    /// Array of the constants stored in this chunk
     pub constants: FFIArray<RuntimeConstant>,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct FileImport {
+    pub path: *const FFIString,
+    pub internal_path: *const FFIString,
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct FileImportChunk {
+    /// Index of the raw version of this chunk
+    pub raw_index: usize,
 
+    pub file_imports: FFIArray<FileImport>,
 }
 
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-use std::{ffi::{c_char, CStr, CString}, fmt::Debug, mem, ops::{Index, IndexMut}, ptr::copy_nonoverlapping};
+use std::{ffi::{c_char, CStr, CString}, fmt::Debug, hash::Hash, mem, ops::{Index, IndexMut}, ptr::copy_nonoverlapping};
 
 #[repr(C)]
 pub struct FFIString {
@@ -82,6 +82,23 @@ pub enum FFIOption<T> {
 pub struct FFIArray<T> {
     pub data: *mut T,
     pub len: usize, // in elements
+}
+
+impl<T: Clone + Hash> Hash for FFIArray<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let elements: Vec<T> = unsafe { std::slice::from_raw_parts(self.data, self.len) }.to_vec();
+        elements.hash(state)
+    }
+}
+
+impl<T: Clone + Eq> Eq for FFIArray<T> {}
+
+impl<T: Clone + PartialEq> PartialEq for FFIArray<T> {
+    fn eq(&self, other: &Self) -> bool {
+        let self_: Vec<T> = unsafe { std::slice::from_raw_parts(self.data, self.len) }.to_vec();
+        let other: Vec<T> = unsafe { std::slice::from_raw_parts(other.data, other.len) }.to_vec();
+        self_ == other
+    }
 }
 
 impl<T: Debug> Debug for FFIArray<T> {
