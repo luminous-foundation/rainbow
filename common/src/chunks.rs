@@ -5,7 +5,7 @@ use crate::{ffi::{FFIArray, FFIString}, instructions::{Instruction, RawInstructi
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub enum RawCodeBlock {
-    Instructions(Vec<RawInstruction>),
+    Instructions(FFIArray<RawInstruction>),
     Scope(usize),
     Struct(RawStruct),
     Function(RawFunction),
@@ -286,7 +286,7 @@ pub enum RawChunk {
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub enum CodeBlock {
-    Instructions(Vec<Instruction>),
+    Instructions(FFIArray<Instruction>),
     Scope(usize),
     Struct(Struct),
     Function(Function),
